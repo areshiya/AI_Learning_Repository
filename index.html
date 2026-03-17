@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>我的知识体系：基础固定与浮动拓展</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script type="text/javascript" src="data.js"></script>
+    
+    <style type="text/css">
+        body { font-family: sans-serif; background-color: #f9f9f9; text-align: center; margin: 0; padding: 20px;}
+        #mynetwork { width: 100%; height: 650px; border: 2px solid #ddd; border-radius: 10px; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.1);}
+        .instructions { margin-bottom: 20px; color: #555; line-height: 1.6; }
+        .highlight { color: #2B7CE9; font-weight: bold; }
+        .float-text { color: #FF5722; font-weight: bold; }
+        
+        /* 新增：详情展示卡片的样式 */
+        #infoCard {
+            display: none; /* 默认隐藏 */
+            position: absolute;
+            top: 150px;
+            right: 50px;
+            width: 300px;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            padding: 20px;
+            text-align: left;
+            z-index: 100; /* 保证显示在最上层 */
+        }
+        #infoCard h3 { margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        #infoCard p { color: #666; line-height: 1.5; font-size: 14px; }
+        #closeBtn {
+            background-color: #f44336; color: white; border: none; padding: 5px 10px;
+            border-radius: 4px; cursor: pointer; float: right; margin-top: 10px;
+        }
+        #closeBtn:hover { background-color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <h2>🧠 我的知识图谱</h2>
+    <div class="instructions">
+        <span class="highlight">实心蓝框（基础）</span>拖拽固定 | <span class="float-text">虚线红框（拓展）</span>环绕飘动<br>
+        <b>👉 提示：鼠标左键点击任何节点，可以查看详细笔记！</b>
+    </div>
+    
+    <div id="mynetwork"></div>
+
+    <div id="infoCard">
+        <h3 id="cardTitle">节点标题</h3>
+        <p id="cardContent">这里会显示你写在 details 里的详细笔记内容...</p>
+        <button id="closeBtn" onclick="closeCard()">关闭</button>
+    </div>
+
+    <script type="text/javascript">
+        var nodes = new vis.DataSet(myKnowledgeData.nodes);
+        var edges = new vis.DataSet(myKnowledgeData.edges);
+
+        var container = document.getElementById('mynetwork');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: { shape: 'box', font: { size: 16, face: 'sans-serif' }, margin: 10 },
+            groups: {
+                solid: { color: { background: '#D2E5FF', border: '#2B7CE9' }, borderWidth: 2 },
+                floating: { color: { background: '#FFFFFF', border: '#FF5722' }, borderWidth: 2, shapeProperties: { borderDashes: [5, 5] } }
+            },
+            edges: { arrows: 'to', color: '#999' },
+            physics: { enabled: true, barnesHut: { springLength: 150, centralGravity: 0.1 } },
+            interaction: { hover: true } // 允许鼠标悬停效果
+        };
+        var network = new vis.Network(container, data, options);
+
+        // --- 拖拽固定逻辑 ---
+        network.on("dragStart", function (params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                if (nodes.get(nodeId).group === 'solid') { nodes.update({id: nodeId, fixed: false}); }
+            }
+        });
+        network.on("dragEnd", function (params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                if (nodes.get(nodeId).group === 'solid') { nodes.update({id: nodeId, fixed: {x: true, y: true}}); }
+            }
+        });
+
+        // ==========================================
+        // --- 新增：点击事件逻辑 ---
+        // ==========================================
+        network.on("click", function (params) {
+            if (params.nodes.length > 0) {
+                // 如果点中了某个节点
+                var nodeId = params.nodes[0];
+                var clickedNode = nodes.get(nodeId);
+                
+                // 把节点的数据填入卡片
+                document.getElementById('cardTitle').innerText = clickedNode.label;
+                // 如果有 details 就显示，没有就提示暂无
+                document.getElementById('cardContent').innerText = clickedNode.details || "暂无详细笔记，快去 data.js 里补充吧！";
+                
+                // 显示卡片
+                document.getElementById('infoCard').style.display = 'block';
+            } else {
+                // 如果点到了空白处，隐藏卡片
+                closeCard();
+            }
+        });
+
+        // 关闭卡片的函数
+        function closeCard() {
+            document.getElementById('infoCard').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
