@@ -104,7 +104,7 @@
                                 background: isFixed ? 'rgba(0, 229, 255, 0.1)' : 'rgba(33, 38, 45, 0.4)', // 透明感内衬
                                 border: isFixed ? '#00e5ff' : '#006064', // 固定节点高亮，普通节点低亮青
                                 hover: { background: 'rgba(0, 229, 255, 0.3)', border: '#00e5ff' },
-                                highlight: { background: 'rgba(0, 229, 255, 0.2)', border: '#00e5ff' }
+                                highlight: { background: 'rgba(0, 229, 255, 1)', border: '#00e5ff' }
                             },
                             font: { color: isFixed ? '#fff' : '#607d8b' } // 固定节点文字全白，普通节点文字偏灰
                         });
@@ -117,7 +117,7 @@
                                     to: meta.id || file, 
                                     arrows: 'to',
                                     // 🔥 视觉修改：极细、暗灰青色的电路/引力线
-                                    color: { color: 'rgba(0, 150, 136, 0.15)', highlight: 'rgba(0, 229, 255, 0.8)', opacity: 0.15 },
+                                    color: { color: 'rgba(0, 200, 200, 0.6)',hover:'rgba(0,210,215,0.7)', highlight: 'rgba(0, 229, 255, 0.8)', opacity: 0.15 },
                                 });
                             });
                         }
@@ -131,9 +131,9 @@
                 nodes: {
                     shape: 'dot',
                     font: { 
-                        size: 13, 
+                        size: 15, 
                         face: 'Consolas, Monaco, monospace', 
-                        vadjust: 30, // 文字离圆点更远一点，营造距离感
+                        vadjust: 20, // 文字离圆点更远一点，营造距离感
                         strokeWidth: 0,
                         align: 'center'
                     },
