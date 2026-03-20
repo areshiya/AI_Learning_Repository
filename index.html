@@ -57,186 +57,194 @@
     </div>
 
     <script>
-        let network = null;
-        let nodes = new vis.DataSet();
-        let edges = new vis.DataSet();
-        let firstNodeId = null; //记录第一个文件的 ID
+    let network = null;
+    let nodes = new vis.DataSet();
+    let edges = new vis.DataSet();
+    let firstNodeId = null; 
+    const contentCache = {}; 
 
-        // 核心管理
-        const basePositions = {};    // 记录普通节点晃动的中心点
-        const wobblingNodes = new Set(); // 记录普通哪些节点正在摆动
-        let draggingNodeId = null;   // 正在被拖拽的节点 ID
-        let wobbleStep = 0;
+    const basePositions = {};    
+    const wobblingNodes = new Set(); 
+    let draggingNodeId = null;   
+    let wobbleStep = 0;
 
-        async function startEngine() {
+    async function startEngine() {
         try {
-            const listRes = await fetch('list.json');
-            if (!listRes.ok) throw new Error('无法读取 list.json');
-            const files = await listRes.json();
+            const res = await fetch('data.md');
+            if (!res.ok) throw new Error('无法加载 data.md');
+            const fullText = await res.text();
 
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const res = await fetch(`./notes/${file}`);
-                const text = await res.text();
-                const part = text.match(/^---\r?\n([\s\S]+?)\r?\n---/);
-                
-                if (part) {
+            const sections = fullText.split('###---').filter(s => s.trim());
+
+            sections.forEach((section, index) => {
+                const separatorIndex = section.indexOf('---');
+                if (separatorIndex !== -1) {
+                    const yamlPart = section.substring(0, separatorIndex).trim();
+                    const bodyPart = section.substring(separatorIndex + 3).trim();
+
                     try {
-                        const meta = jsyaml.load(part[1]);
+                        const meta = jsyaml.load(yamlPart);
+                        const nodeId = meta.id || `node_${index}`;
                         const isFixed = meta.status === 'fixed';
-                        const nodeId = meta.id || file;
+                        
+                        const contentLength = bodyPart.length;
+                        // 设定基础大小为 25
+                        // 使用 Math.sqrt (平方根) 让大小增长得更平滑，不至于内容一多就变得巨大
+                        // 这里的 2 是调节系数，你可以根据喜好调整
+                        const dynamicSize = 20 + Math.sqrt(contentLength) * 2;
 
-                        if (i === 0) {
-                            firstNodeId = nodeId;
-                        }
+
+                        if (index === 0) firstNodeId = nodeId;
+                        contentCache[nodeId] = bodyPart;
 
                         nodes.add({
-                            id: meta.id || file,
-                            label: isFixed ? `${meta.label || file}` : (meta.label || file), // 固定节点加括号装饰
-                            file: file,
-                            fixed: isFixed, 
-                            physics: !isFixed, 
-                            // value: isFixed ? 25 : 15, // 🔥 功能修改：所有节点大小统一
-                            size: 20, // 统一尺寸，像电路上的触点
-
-                            // 🔥 视觉修改：节点视觉完全还原图片中的霓虹青色发光
+                            id: nodeId,
+                            label: meta.label || nodeId,
+                            fixed: isFixed,
+                            physics: !isFixed,
+                            size: dynamicSize,
+                            isFloating: !isFixed,
+                            initialPos:{x: 0, y: 0},
                             color: {
-                                background: isFixed ? 'rgba(0, 229, 255, 0.1)' : 'rgba(33, 38, 45, 0.4)', // 透明感内衬
-                                border: isFixed ? '#00e5ff' : '#006064', // 固定节点高亮，普通节点低亮青
-                                hover: { background: 'rgba(0, 229, 255, 0.3)', border: '#00e5ff' },
-                                highlight: { background: 'rgba(0, 229, 255, 1)', border: '#00e5ff' }
+                                background: isFixed ? 'rgba(13,59,69,100)' : 'rgba(16,70,79,100)',
+                                border: isFixed ? '#00e5ff' : '#006064',
+                                hover: { background: 'rgba(5,119,134,100)', border: '#00e5ff' },
+                                highlight: { background: 'rgba(0, 190, 200, 1)', border: '#00e5ff' }
                             },
-                            font: { color: isFixed ? '#fff' : '#607d8b' } // 固定节点文字全白，普通节点文字偏灰
+                            font: { color: isFixed ? '#fff' : '#808d9b' }
                         });
 
                         if (meta.connections && Array.isArray(meta.connections)) {
                             meta.connections.forEach(targetId => {
-                                // 功能修改：箭头反转 (from target to self)
-                                edges.add({ 
-                                    from: targetId, 
-                                    to: meta.id || file, 
+                                edges.add({
+                                    from: targetId,
+                                    to: nodeId,
                                     arrows: 'to',
-                                    // 🔥 视觉修改：极细、暗灰青色的电路/引力线
-                                    color: { color: 'rgba(0, 200, 200, 0.6)',hover:'rgba(0,210,215,0.7)', highlight: 'rgba(0, 229, 255, 0.8)', opacity: 0.15 },
+                                    color: { color: 'rgba(0, 200, 200, 0.6)',hover:'rgba(0,190,190,1)',highlight:'rgba(0,180,180,1)', opacity: 0.15 }
                                 });
                             });
                         }
-                    } catch (yamlErr) { console.error(`${file} YAML 错误:`, yamlErr); }
+                    } catch (e) {
+                        console.error("YAML 解析出错:", e);
+                    }
                 }
+            });
+
+            if (nodes.length > 0) {
+                initNetwork(); 
+            } else {
+                console.warn("未解析到有效节点。");
             }
-
-            const container = document.getElementById('starfield');
-            const options = {
-                // --- 🔥 全局视觉调整 ---
-                nodes: {
-                    shape: 'dot',
-                    font: { 
-                        size: 15, 
-                        face: 'Consolas, Monaco, monospace', 
-                        vadjust: 20, // 文字离圆点更远一点，营造距离感
-                        strokeWidth: 0,
-                        align: 'center'
-                    },
-                    borderWidth: 1.5,
-                    // 🔥 核心改动：强烈的霓虹青色发光
-                    shadow: { 
-                        enabled: true, 
-                        color: 'rgba(0, 229, 255, 0.9)', 
-                        size: 15, x: 0, y: 0 
-                    }
-                },
-                edges: {
-                    smooth: false, // 功能修改：硬直线连线
-                    width: 1,    // 🔥 极细线条
-                    arrows: { to: { enabled: true, scaleFactor: 0.3 } }, // 🔥 极小箭头，防止破坏极简几何感
-                    hoverWidth: 1.5
-                },
-                physics: {
-                    enabled: true,
-                    solver: 'barnesHut',
-                    barnesHut: {
-                        gravitationalConstant: -10000, 
-                        centralGravity: 0.1, 
-                        springLength: 300, 
-                        springConstant: 0.04 
-                    },
-                    stabilization: { iterations: 150, updateInterval: 25 }
-                },
-                interaction: { hover: true, dragNodes: true, navigationButtons: false } // 关闭自带的导航按钮，使用自定义
-            };
-
-            network = new vis.Network(container, { nodes, edges }, options);
-            // 当星图第一次自动排布好后执行
-            network.once("stabilizationIterationsDone", function() {
-                const allIds = nodes.getIds();
-                const pos = network.getPositions(allIds);
-                
-                allIds.forEach(id => {
-                    const nodeData = nodes.get(id);
-                    // 🔥 检查：如果不是蓝色边框（即不是固定节点），就加入摆动队列
-                    if (nodeData.color.border !== '#00e5ff') {
-                        basePositions[id] = { x: pos[id].x, y: pos[id].y }; // 记录老家
-                        wobblingNodes.add(id); // 加入摆动名单
-                        nodes.update({ id: id, fixed: true }); // 必须固定，否则会跟动画冲突
-                    }
-                });
-                network.fit({ animation: { duration: 1500 } });
-            });
-
-            // --- 功能逻辑部分与之前完全一致 ---
-
-            // A. 开始拖拽
-            network.on("dragStart", (params) => {
-                if (params.nodes.length > 0) {
-                    draggingNodeId = params.nodes[0];
-                    // 拖动时临时解除固定，否则拖不动
-                    nodes.update({ id: draggingNodeId, fixed: false });
-                }
-            });
-
-            // B. 结束拖拽
-            network.on("dragEnd", (params) => {
-                if (params.nodes.length > 0) {
-                    const nodeId = params.nodes[0];
-                    const pos = network.getPositions([nodeId])[nodeId];
-                    const nodeData = nodes.get(nodeId);
-
-                    // 1. 先设为固定，防止物理引擎拉走
-                    nodes.update({ id: nodeId, fixed: true });
-
-                    // 2. 🔥 只有普通节点（不是蓝色那个 #00e5ff）移动后开启摆动
-                    if (nodeData.color.border !== '#00e5ff') {
-                        basePositions[nodeId] = { x: pos.x, y: pos.y };
-                        wobblingNodes.add(nodeId);
-                    }
-                    
-                    draggingNodeId = null; 
-                }
-            });
-
-            // C. 点击打开笔记
-            network.on("click", (e) => {
-                if (e.nodes.length > 0) {
-                    const node = nodes.get(e.nodes[0]);
-                    openNote(node.file);
-                } else {
-                    togglePanel(false);
-                }
-            });
-
-            animate(); // 启动摆动循环
-
-        } catch (err) { console.error("崩溃:", err); }
+        } catch (err) {
+            console.error("引擎启动失败:", err);
+        }
     }
 
-    // --- 摆动动画引擎 (功能逻辑未变，只有 amplitude 调小了，更符合 Submachine 的静谧感) ---
+    function initNetwork() {
+        const container = document.getElementById('starfield');
+        const options = {
+            nodes: {
+                shape: 'circle',
+                margin: 10,
+                font: { size: 15, face: 'Consolas, monospace', vadjust: 20,color: '#fff' },
+                borderWidth: 1.5,
+                shadow: { enabled: true, color: 'rgba(0, 229, 255, 0.9)', size: 15 }
+            },
+            edges: {
+                smooth: false,
+                width: 1,
+                arrows: { to: { enabled: true, scaleFactor: 0.3 } }
+            },
+            physics: {
+                enabled: true,
+                solver: 'barnesHut',
+                barnesHut: {
+                    // 1. 斥力系数：数值越小（负得越多），节点之间排斥越强。
+                    // 从默认的 -2000 改为 -4000 甚至更小，能显著拉开距离。
+                    gravitationalConstant: -5000, 
+
+                    // 2. 中心引力：数值越小，节点越往外扩散，不会总想往中间挤。
+                    centralGravity: 0.01, 
+
+                    // 3. 弹簧长度：这是连线两端节点的“理想距离”。
+                    // 增加这个值（比如从 100 改为 250），线会变长，布局更稀疏。
+                    springLength: 250, 
+
+                    // 4. 弹簧常数：数值越小，线越“软”，斥力就更容易把节点推开。
+                    springConstant: 0.04,
+                    
+                    damping: 0.09,
+                    avoidOverlap: 1 // 设为 1 强制避免节点重叠
+                },
+                stabilization: { 
+                    iterations: 200, // 增加初始化计算次数，让它展开得更彻底再显示
+                    updateInterval: 25 
+                }
+            },
+            interaction: { hover: true }
+        };
+
+        network = new vis.Network(container, { nodes, edges }, options);
+
+        // 绑定事件（必须在 network 实例化后）
+        network.on("click", (e) => {
+            if (e.nodes.length > 0) {
+                openNote(e.nodes[0]);
+            } else {
+                togglePanel(false);
+            }
+        });
+
+        network.on("dragStart", (params) => {
+            if (params.nodes.length > 0) {
+                draggingNodeId = params.nodes[0];
+                nodes.update({ id: draggingNodeId, fixed: false });
+            }
+        });
+
+        network.on("dragEnd", (params) => {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const pos = network.getPositions([nodeId])[nodeId];
+                const nodeData = nodes.get(nodeId);
+                nodes.update({ id: nodeId, fixed: true });
+                if (nodeData.color.border !== '#00e5ff') {
+                    basePositions[nodeId] = { x: pos.x, y: pos.y };
+                    wobblingNodes.add(nodeId);
+                }
+                draggingNodeId = null; 
+            }
+        });
+
+        network.once("stabilizationIterationsDone", function() {
+            const allIds = nodes.getIds();
+            const pos = network.getPositions(allIds);
+            allIds.forEach(id => {
+                const nodeData = nodes.get(id);
+                if (nodeData.color.border !== '#00e5ff') {
+                    basePositions[id] = { x: pos[id].x, y: pos[id].y };
+                    wobblingNodes.add(id);
+                    nodes.update({ id: id, fixed: true });
+                }
+            });
+            network.fit({ animation: { duration: 1500 } });
+        });
+
+        animate();
+    }
+
+    function openNote(nodeId) {
+        const body = contentCache[nodeId] || "未找到内容";
+        document.getElementById('mdContent').innerHTML = marked.parse(body);
+        togglePanel(true);
+        document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+    }
+
     function animate() {
         wobbleStep += 0.04;
-        const amplitude = 10.0; // 调小摆动幅度
+        const amplitude = 10.0;
         const updates = [];
-
         wobblingNodes.forEach(nodeId => {
-            // 只有【没在被拽】且【有基准坐标】且【非原本就固定】的才更新
             if (nodeId !== draggingNodeId && basePositions[nodeId]) {
                 updates.push({
                     id: nodeId,
@@ -245,33 +253,16 @@
                 });
             }
         });
-
         if (updates.length > 0) { nodes.update(updates); }
         requestAnimationFrame(animate);
     }
 
-    // --- 辅助函数 ---
-    async function openNote(fileName) {
-        const res = await fetch(`./notes/${fileName}`);
-        const text = await res.text();
-        const body = text.replace(/^---\r?\n[\s\S]+?\r?\n---/, ''); // 剔除元数据
-        document.getElementById('mdContent').innerHTML = marked.parse(body);
-        togglePanel(true);
-        document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
-    }
-
     function togglePanel(show) { document.getElementById('sidePanel').className = show ? 'active' : ''; }
+    
     function resetCamera() {
         if (firstNodeId && network) {
-            network.focus(firstNodeId, {
-                scale: 0.8, // 缩放比例，数字越大离得越近
-                animation: {
-                    duration: 1000,
-                    easingFunction: 'easeInOutQuad'
-                }
-            });
-        } else {
-            // 如果找不到核心，则回退到全屏适应
+            network.focus(firstNodeId, { scale: 0.8, animation: { duration: 1000 } });
+        } else if(network) {
             network.fit({ animation: { duration: 1000 } });
         }
     }
